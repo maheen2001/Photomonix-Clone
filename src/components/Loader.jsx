@@ -2,7 +2,7 @@ const Loader = () => {
   return (
     <div className="flex flex-col items-center">
       <div className="relative">
-        <div className="animate-spin rounded-full h-20 w-20 border-t-4 border-b-4 border-linear-to-r from-blue-500 to-purple-500"></div>
+        <div className="animate-spin rounded-full h-20 w-20 border-t-4 border-b-4 border-gradient-to-r from-blue-500 to-purple-500"></div>
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="h-12 w-12 bg-linear-to-r from-blue-500 to-purple-500 rounded-full animate-pulse"></div>
         </div>

@@ -6,6 +6,8 @@ import ImagePreview from './components/ImagePreview'
 import ImageUploader from './components/ImageUploader'
 import Home from './pages/Home.jsx'
 import Loader from './components/Loader.jsx'
+import GeminiEnhancedProcessor from './api/GeminiEnhancedProcessor.jsx'
+
 
 function App() {
   
