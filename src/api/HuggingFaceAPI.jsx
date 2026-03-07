@@ -1,12 +1,65 @@
-import { analyzeImageAesthetics } from './ImageAnalyzerAPI';
+// No external imports needed for now
+
+
+const HF_TOKEN = import.meta.env.VITE_HUGGINGFACE_TOKEN;
+
+/**
+ * Remove background using BriaAI's RMBG-1.4 model
+ */
+export const removeBackground = async (imageFile) => {
+  if (!HF_TOKEN) throw new Error("Hugging Face token not found");
+
+  try {
+    const response = await fetch(
+      "https://api-inference.huggingface.co/models/briaai/RMBG-1.4",
+      {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${HF_TOKEN}` },
+        body: imageFile,
+      }
+    );
+
+    if (!response.ok) throw new Error(`Background removal failed: ${response.statusText}`);
+
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  } catch (error) {
+    console.error("Error removing background:", error);
+    throw error;
+  }
+};
+
+/**
+ * Upscale image and improve quality using Real-ESRGAN
+ */
+export const upscaleImage = async (imageFile) => {
+  if (!HF_TOKEN) throw new Error("Hugging Face token not found");
+
+  try {
+    const response = await fetch(
+      "https://api-inference.huggingface.co/models/Qiliang/Real-ESRGAN",
+      {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${HF_TOKEN}` },
+        body: imageFile,
+      }
+    );
+
+    if (!response.ok) throw new Error(`Upscaling failed: ${response.statusText}`);
+
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  } catch (error) {
+    console.error("Error upscaling image:", error);
+    throw error;
+  }
+};
 
 /**
  * Enhanced image enhancement with automatic aesthetic background selection
  */
 const enhanceImageWithAutoBackground = async (file, options, onProgress) => {
   try {
-    const HF_TOKEN = import.meta.env.VITE_HUGGINGFACE_TOKEN;
-    
     if (!HF_TOKEN) {
       throw new Error("Hugging Face token not found. Add VITE_HUGGINGFACE_TOKEN to .env");
     }
@@ -14,7 +67,7 @@ const enhanceImageWithAutoBackground = async (file, options, onProgress) => {
     // Step 1: Analyze image aesthetics
     if (onProgress) onProgress(10, 'Analyzing image aesthetics...');
     const aesthetic = await analyzeImageAesthetics(file);
-    
+
     // Merge analyzed aesthetic with user options
     const enhancedOptions = {
       ...options,
@@ -25,30 +78,13 @@ const enhanceImageWithAutoBackground = async (file, options, onProgress) => {
       gradientEnd: aesthetic.gradientEnd,
     };
 
-    let processedImageUrl = null;
     let finalImageUrl = await fileToDataUrl(file);
 
     // Step 2: Remove background using RMBG
     if (enhancedOptions.backgroundChange && enhancedOptions.backgroundType !== "none") {
       if (onProgress) onProgress(25, 'Removing background...');
-      
       try {
-        const removalResponse = await fetch(
-          "https://api-inference.huggingface.co/models/briaai/RMBG-1.4",
-          {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${HF_TOKEN}`,
-            },
-            body: file,
-          }
-        );
-
-        if (removalResponse.ok) {
-          const blob = await removalResponse.blob();
-          processedImageUrl = URL.createObjectURL(blob);
-          finalImageUrl = processedImageUrl;
-        }
+        finalImageUrl = await removeBackground(file);
       } catch (error) {
         console.log("Background removal skipped:", error);
       }
@@ -57,23 +93,9 @@ const enhanceImageWithAutoBackground = async (file, options, onProgress) => {
     // Step 3: Enhance image quality
     if (onProgress) onProgress(45, 'Enhancing image quality...');
     try {
-      const enhancementResponse = await fetch(
-        "https://api-inference.huggingface.co/models/Qiliang/Real-ESRGAN",
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${HF_TOKEN}`,
-          },
-          body: file,
-        }
-      );
-
-      if (enhancementResponse.ok) {
-        const enhancedBlob = await enhancementResponse.blob();
-        finalImageUrl = URL.createObjectURL(enhancedBlob);
-      }
+      finalImageUrl = await upscaleImage(file);
     } catch (error) {
-      console.log("Enhancement skipped, continuing with original");
+      console.log("Enhancement skipped, continuing with current image");
     }
 
     // Step 4: Apply background with aesthetic awareness
@@ -105,7 +127,7 @@ const enhanceImageWithAutoBackground = async (file, options, onProgress) => {
 
   } catch (error) {
     console.error('Image Enhancement Error:', error);
-    
+
     // Fallback: Return original image
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -127,6 +149,7 @@ const enhanceImageWithAutoBackground = async (file, options, onProgress) => {
 const applyAestheticBackground = async (imageUrl, options) => {
   return new Promise((resolve) => {
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.onload = () => {
       const canvas = document.createElement('canvas');
       canvas.width = img.width;
@@ -135,7 +158,7 @@ const applyAestheticBackground = async (imageUrl, options) => {
 
       // Create aesthetic background
       const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      
+
       const bgColor = options.backgroundColor || '#f5f5f5';
       const gradEnd = options.gradientEnd || '#e0e0e0';
 
@@ -150,13 +173,14 @@ const applyAestheticBackground = async (imageUrl, options) => {
       // Blend subject onto background
       const blendIntensity = (options.backgroundIntensity || 50) / 100;
       ctx.globalAlpha = 0.9 + (blendIntensity * 0.1);
-      
+
       // Apply smart blending at edges
       applyFeatheringEffect(ctx, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
 
       resolve(canvas.toDataURL('image/png', 0.95));
     };
+    img.onerror = () => resolve(imageUrl);
     img.src = imageUrl;
   });
 };
@@ -218,7 +242,7 @@ const addBackgroundPattern = (ctx, width, height, backgroundType) => {
  */
 const applyFeatheringEffect = (ctx, width, height) => {
   const featherSize = Math.min(width, height) * 0.1;
-  
+
   // Top feather
   const topGrad = ctx.createLinearGradient(0, 0, 0, featherSize);
   topGrad.addColorStop(0, 'rgba(0, 0, 0, 0.3)');
@@ -237,9 +261,10 @@ const applyFeatheringEffect = (ctx, width, height) => {
 /**
  * Enhanced canvas-based image adjustments
  */
-const applyCanvasEnhancements = async (imageUrl, options, aesthetic) => {
+export const applyCanvasEnhancements = async (imageUrl, options, aesthetic) => {
   return new Promise((resolve) => {
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.onload = () => {
       const canvas = document.createElement('canvas');
       canvas.width = img.width;
@@ -298,6 +323,7 @@ const applyCanvasEnhancements = async (imageUrl, options, aesthetic) => {
       ctx.putImageData(imageData, 0, 0);
       resolve(canvas.toDataURL('image/png', 0.95));
     };
+    img.onerror = () => resolve(imageUrl);
     img.src = imageUrl;
   });
 };
@@ -343,7 +369,7 @@ const increaseContrast = (data, factor) => {
 /**
  * Convert file to data URL
  */
-const fileToDataUrl = (file) => {
+export const fileToDataUrl = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result);
@@ -352,4 +378,70 @@ const fileToDataUrl = (file) => {
   });
 };
 
-export { enhanceImageWithAutoBackground, analyzeImageAesthetics };
+/**
+ * Analyzes image for aesthetic properties to guide background selection
+ */
+export const analyzeImageAesthetics = async (imageFile) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 100; // Small sample size for performance
+        canvas.height = 100;
+        ctx.drawImage(img, 0, 0, 100, 100);
+
+        const imageData = ctx.getImageData(0, 0, 100, 100).data;
+        let r = 0, g = 0, b = 0, brightness = 0, saturation = 0;
+
+        for (let i = 0; i < imageData.length; i += 4) {
+          r += imageData[i];
+          g += imageData[i + 1];
+          b += imageData[i + 2];
+
+          const max = Math.max(imageData[i], imageData[i + 1], imageData[i + 2]);
+          const min = Math.min(imageData[i], imageData[i + 1], imageData[i + 2]);
+          brightness += (max + min) / 2;
+          saturation += max === 0 ? 0 : (max - min) / max;
+        }
+
+        const pixelCount = 100 * 100;
+        const avgR = r / pixelCount;
+        const avgG = g / pixelCount;
+        const avgB = b / pixelCount;
+        const avgBrightness = brightness / pixelCount;
+        const avgSaturation = saturation / pixelCount;
+
+        // Simple logic for aesthetic mapping
+        let mood = 'studio_minimal';
+        let colorTemp = 'neutral';
+
+        if (avgBrightness > 180) mood = 'modern_clean';
+        else if (avgBrightness < 80) mood = 'dark_minimal';
+        else if (avgG > avgR && avgG > avgB) mood = 'outdoor_nature';
+        else if (avgR > 150 && avgG > 100) mood = 'outdoor_sunset';
+
+        if (avgR > avgB + 20) colorTemp = 'warm';
+        else if (avgB > avgR + 20) colorTemp = 'cool';
+
+        resolve({
+          mood: mood,
+          style: avgSaturation > 0.5 ? 'vibrant' : 'minimalist',
+          colorTemp: colorTemp,
+          backgroundType: mood,
+          backgroundColor: avgBrightness > 200 ? '#ffffff' : (avgBrightness < 50 ? '#1a1a1a' : '#f0f0f0'),
+          gradientEnd: colorTemp === 'warm' ? '#ffe0b2' : (colorTemp === 'cool' ? '#e1f5fe' : '#e0e0e0'),
+          confidence: 0.85,
+          avgBrightness,
+          avgSaturation
+        });
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(imageFile);
+  });
+};
+
+export { enhanceImageWithAutoBackground };
